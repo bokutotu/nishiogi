@@ -3,7 +3,7 @@ use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ClaudeRequest {
     pub sender: String,
     pub receiver: String,
@@ -11,43 +11,51 @@ pub struct ClaudeRequest {
     pub task_id: String,
     pub command: String,
     pub payload: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ClaudeResponse {
     pub status: String,
     pub payload: serde_json::Value,
 }
 
 pub struct ClaudeClient {
-    client: Client,
-    base_url: String,
+    endpoint: String,
     api_key: String,
+    client: Client,
 }
 
 impl ClaudeClient {
-    pub fn new(base_url: &str, api_key: &str) -> Self {
-        let client = Client::new();
+    pub fn new(endpoint: &str, api_key: &str) -> Self {
         ClaudeClient {
-            client,
-            base_url: base_url.to_string(),
+            endpoint: endpoint.to_string(),
             api_key: api_key.to_string(),
+            client: Client::new(),
         }
     }
 
-    pub fn send_request(&self, req: &ClaudeRequest) -> Result<ClaudeResponse, Box<dyn Error>> {
-        let url = format!("{}/agent", self.base_url);
+    pub fn send_request(&self, request: &ClaudeRequest) -> Result<ClaudeResponse, Box<dyn Error>> {
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert("Authorization", HeaderValue::from_str(&format!("Bearer {}", self.api_key))?);
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        headers.insert(
+            "x-api-key",
+            HeaderValue::from_str(&self.api_key)?,
+        );
 
-        let response = self.client.post(&url)
+        let response = self.client
+            .post(&self.endpoint)
             .headers(headers)
-            .json(req)
-            .send()?
-            .error_for_status()?;
+            .json(request)
+            .send()?;
 
-        let claude_response = response.json::<ClaudeResponse>()?;
-        Ok(claude_response)
+        let response: ClaudeResponse = response.json()?;
+        Ok(response)
     }
 }

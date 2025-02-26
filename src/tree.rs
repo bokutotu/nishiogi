@@ -2,7 +2,15 @@ use std::{fs, io, path::Path};
 
 use regex::Regex;
 
-pub fn generate_tree(path: &Path, prefix: &str, ignore: Option<&[Regex]>) -> io::Result<String> {
+pub fn generate_tree(
+    path: &Path,
+    prefix: &str,
+    ignore: Option<&[Regex]>,
+    depth: Option<usize>,
+) -> io::Result<String> {
+    if let Some(0) = depth {
+        return Ok(String::new());
+    }
     let mut output = String::new();
     let entries = fs::read_dir(path)?;
 
@@ -32,7 +40,10 @@ pub fn generate_tree(path: &Path, prefix: &str, ignore: Option<&[Regex]>) -> io:
             } else {
                 format!("{prefix}│   ")
             };
-            output.push_str(&generate_tree(&new_path, &new_prefix, ignore)?);
+            if depth.unwrap_or(usize::MAX) > 0 {
+                let new_depth = depth.map(|d| d - 1);
+                output.push_str(&generate_tree(&new_path, &new_prefix, ignore, new_depth)?);
+            }
         }
     }
     Ok(output)
@@ -105,7 +116,7 @@ mod tests {
         └── helpers.test.ts
 ";
         // 実際の出力を取得
-        let result = generate_tree(base_path, "", None)?;
+        let result = generate_tree(base_path, "", None, None)?;
 
         // 結果を比較
         assert_eq!(result, expected);
@@ -125,8 +136,37 @@ mod tests {
 └── b.txt
 ";
         let ignore = [Regex::new(r"^\..*").unwrap()];
-        let result = generate_tree(base_path, "", Some(&ignore))?;
+        let result = generate_tree(base_path, "", Some(&ignore), None)?;
         assert_eq!(result, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_tree_depth_limited() -> io::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let base_path = temp_dir.path();
+        // ルートにファイルとディレクトリを作成
+        File::create(base_path.join("a.txt"))?;
+        fs::create_dir(base_path.join("subdir"))?;
+        File::create(base_path.join("subdir").join("b.txt"))?;
+
+        // depth = Some(1) の場合、サブディレクトリ内の内容は表示されず、サブディレクトリ名のみが出力される
+        let expected_depth1 = "\
+├── a.txt
+└── subdir
+";
+        let result_depth1 = generate_tree(base_path, "", None, Some(1))?;
+        assert_eq!(result_depth1, expected_depth1);
+
+        // depth = Some(2) の場合、サブディレクトリ内も表示される
+        let expected_depth2 = "\
+├── a.txt
+└── subdir
+    └── b.txt
+";
+        let result_depth2 = generate_tree(base_path, "", None, Some(2))?;
+        assert_eq!(result_depth2, expected_depth2);
+
         Ok(())
     }
 }

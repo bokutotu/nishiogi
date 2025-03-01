@@ -26,7 +26,7 @@ impl fmt::Display for FileReadError {
         match self {
             FileReadError::NotFound => write!(f, "File not found"),
             FileReadError::IsDirectory => write!(f, "Path is a directory, not a file"),
-            FileReadError::Io(err) => write!(f, "I/O error: {}", err),
+            FileReadError::Io(err) => write!(f, "I/O error: {err}"),
         }
     }
 }

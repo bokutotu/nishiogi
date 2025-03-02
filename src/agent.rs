@@ -18,31 +18,16 @@
 //!
 //! The agent implements comprehensive error handling through the `AgentError` enum,
 //! allowing for graceful recovery and detailed error reporting.
-//!
-//! ## Example
-//!
-//! ```rust,no_run
-//! use nishiogi::agent::Agent;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let agent = Agent::new().await?;
-//!     
-//!     // Run the agent with a user query
-//!     let response = agent.process_query(
-//!         "Show me the directory structure and the content of main.rs"
-//!     ).await?;
-//!     
-//!     println!("Agent response: {}", response);
-//!     Ok(())
-//! }
-//! ```
 
-use std::{error::Error, fmt, path::Path};
+use std::{
+    error::Error,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     github_copilot_client::{CopilotClient, CopilotError, Message},
-    show_file::read_file_content,
+    show_file::{self, read_file_content, FileReadError},
     tree::generate_tree,
 };
 
@@ -51,34 +36,82 @@ const MAX_ITERATIONS: usize = 3;
 /// Errors that can occur during agent operations
 #[derive(Debug)]
 pub enum AgentError {
-    /// Error during query understanding
-    IntentError(String),
-    /// Error during planning phase
-    PlanningError(String),
-    /// Error executing commands
-    CommandError(String),
-    /// Error generating an answer
-    AnswerError(String),
-    /// Error during answer review
-    ReviewError(String),
-    /// Error with GitHub Copilot API
+    // Intent errors
+    IntentExtractionFailed,
+    MalformedIntentResponse,
+    EmptyIntentResponse,
+
+    // Planning errors
+    PlanningFailed,
+    EmptyPlan,
+    InvalidPlanFormat,
+
+    // Command errors
+    UnknownCommand(String), // Keep string for command name
+    PathNotFound(PathBuf),  // Use PathBuf instead of String
+    PathIsDirectory(PathBuf),
+    CommandExecutionFailed,
+
+    // Answer errors
+    AnswerGenerationFailed,
+    EmptyAnswerResponse,
+
+    // Review errors
+    ReviewFailed,
+    NoAnswerToReview,
+    MaxIterationsReached,
+
+    // External errors
     CopilotError(CopilotError),
-    /// I/O errors
     IoError(std::io::Error),
-    /// Other errors
+
+    // Fallback for truly custom errors
     Other(String),
 }
 
 impl fmt::Display for AgentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AgentError::IntentError(msg) => write!(f, "Intent extraction error: {msg}"),
-            AgentError::PlanningError(msg) => write!(f, "Planning error: {msg}"),
-            AgentError::CommandError(msg) => write!(f, "Command execution error: {msg}"),
-            AgentError::AnswerError(msg) => write!(f, "Answer generation error: {msg}"),
-            AgentError::ReviewError(msg) => write!(f, "Review error: {msg}"),
+            // Intent errors
+            AgentError::IntentExtractionFailed => {
+                write!(f, "Failed to extract intent from question")
+            }
+            AgentError::MalformedIntentResponse => {
+                write!(f, "Intent extraction produced malformed response")
+            }
+            AgentError::EmptyIntentResponse => {
+                write!(f, "Intent extraction produced empty response")
+            }
+
+            // Planning errors
+            AgentError::PlanningFailed => write!(f, "Failed to create execution plan"),
+            AgentError::EmptyPlan => write!(f, "Generated plan contains no commands"),
+            AgentError::InvalidPlanFormat => write!(f, "Generated plan has invalid format"),
+
+            // Command errors
+            AgentError::UnknownCommand(cmd) => write!(f, "Unknown command: {cmd}"),
+            AgentError::PathNotFound(path) => write!(f, "Path does not exist: {}", path.display()),
+            AgentError::PathIsDirectory(path) => {
+                write!(f, "Path is a directory: {}", path.display())
+            }
+            AgentError::CommandExecutionFailed => write!(f, "Command execution failed"),
+
+            // Answer errors
+            AgentError::AnswerGenerationFailed => write!(f, "Failed to generate answer"),
+            AgentError::EmptyAnswerResponse => write!(f, "Generated answer is empty"),
+
+            // Review errors
+            AgentError::ReviewFailed => write!(f, "Failed to review answer"),
+            AgentError::NoAnswerToReview => write!(f, "No answer available to review"),
+            AgentError::MaxIterationsReached => {
+                write!(f, "Maximum iterations reached without satisfactory answer")
+            }
+
+            // External errors
             AgentError::CopilotError(err) => write!(f, "Copilot error: {err}"),
             AgentError::IoError(err) => write!(f, "I/O error: {err}"),
+
+            // Fallback
             AgentError::Other(msg) => write!(f, "Other error: {msg}"),
         }
     }
@@ -261,9 +294,7 @@ impl Agent {
             // Here you would parse the JSON response, but for simplicity we'll skip that part
             Ok(())
         } else {
-            Err(AgentError::IntentError(
-                "Failed to get intent extraction response".to_string(),
-            ))
+            Err(AgentError::IntentExtractionFailed)
         }
     }
 
@@ -295,16 +326,12 @@ impl Agent {
             self.context.plan = vec!["tree src".to_string(), "show_file src/main.rs".to_string()];
 
             if self.context.plan.is_empty() {
-                return Err(AgentError::PlanningError(
-                    "Plan contains no commands".to_string(),
-                ));
+                return Err(AgentError::EmptyPlan);
             }
 
             Ok(())
         } else {
-            Err(AgentError::PlanningError(
-                "Failed to get planning response".to_string(),
-            ))
+            Err(AgentError::PlanningFailed)
         }
     }
 
@@ -316,14 +343,35 @@ impl Agent {
         for command in &self.context.plan {
             let cmd_result = if command.starts_with("tree ") {
                 let path = command.strip_prefix("tree ").unwrap_or(".");
-                run_tree_command(path)?
+                let path = Path::new(path);
+                
+                // Check if path exists
+                if !path.exists() {
+                    return Err(AgentError::PathNotFound(path.to_path_buf()));
+                }
+                
+                // Directly call the generate_tree function from tree module
+                generate_tree(path, "", None, None)
+                
             } else if command.starts_with("show_file ") {
                 let path = command.strip_prefix("show_file ").unwrap_or("");
-                run_show_file_command(path)?
+                let path = Path::new(path);
+                
+                // Directly call the read_file_content function from show_file module
+                match read_file_content(path) {
+                    Ok(content) => content,
+                    Err(e) => match e {
+                        FileReadError::NotFound => {
+                            return Err(AgentError::PathNotFound(path.to_path_buf()));
+                        }
+                        FileReadError::IsDirectory => {
+                            return Err(AgentError::PathIsDirectory(path.to_path_buf()));
+                        }
+                        FileReadError::Io(io_err) => return Err(AgentError::IoError(io_err)),
+                    },
+                }
             } else {
-                return Err(AgentError::CommandError(format!(
-                    "Unknown command: {command}",
-                )));
+                return Err(AgentError::UnknownCommand(command.clone()));
             };
 
             // Truncate output for logging
@@ -379,16 +427,14 @@ impl Agent {
             println!("Generated answer: {}", choice.message.content);
             Ok(())
         } else {
-            Err(AgentError::AnswerError(
-                "Failed to generate answer".to_string(),
-            ))
+            Err(AgentError::AnswerGenerationFailed)
         }
     }
 
     /// Review the generated answer
     async fn review_answer(&mut self) -> Result<bool, AgentError> {
         let Some(answer) = &self.context.current_answer else {
-            return Err(AgentError::ReviewError("No answer to review".to_string()));
+            return Err(AgentError::NoAnswerToReview);
         };
 
         let messages = vec![
@@ -420,33 +466,7 @@ impl Agent {
 
             Ok(passed)
         } else {
-            Err(AgentError::ReviewError(
-                "Failed to review answer".to_string(),
-            ))
+            Err(AgentError::ReviewFailed)
         }
-    }
-}
-
-/// Run the tree command to generate a directory structure
-fn run_tree_command(path: &str) -> Result<String, AgentError> {
-    let path = Path::new(path);
-    if !path.exists() {
-        return Err(AgentError::CommandError(format!(
-            "Path does not exist: {}",
-            path.display()
-        )));
-    }
-
-    Ok(generate_tree(path, "", None, None))
-}
-
-/// Run the `show_file` command to read file contents
-fn run_show_file_command(path: &str) -> Result<String, AgentError> {
-    let path = Path::new(path);
-    match read_file_content(path) {
-        Ok(content) => Ok(content),
-        Err(e) => Err(AgentError::CommandError(format!(
-            "Failed to read file: {e}",
-        ))),
     }
 }

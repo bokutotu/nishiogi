@@ -6,21 +6,6 @@
 //!
 //! **Note:** This function will panic if it fails to read a directory (for example, due to
 //! insufficient permissions or a non-existent path).
-//!
-//! ## Example
-//!
-//! ```rust
-//! use std::path::Path;
-//! use regex::Regex;
-//! use tree_generator::generate_tree;
-//!
-//! # fn main() {
-//! let path = Path::new(".");
-//! let ignore_patterns = [Regex::new(r"^\..*").unwrap()]; // ignore hidden files
-//! let tree = generate_tree(path, "", Some(&ignore_patterns), Some(3));
-//! println!("{}", tree);
-//! # }
-//! ```
 
 use regex::Regex;
 use std::{fs, path::Path};
@@ -45,21 +30,6 @@ use std::{fs, path::Path};
 /// # Returns
 ///
 /// A `String` containing the tree representation of the directory.
-///
-/// # Examples
-///
-/// ```rust
-/// use std::path::Path;
-/// use regex::Regex;
-/// use tree_generator::generate_tree;
-///
-/// # fn main() {
-/// let path = Path::new(".");
-/// let ignore_patterns = [Regex::new(r"^\..*").unwrap()]; // ignore hidden files
-/// let tree = generate_tree(path, "", Some(&ignore_patterns), Some(3));
-/// println!("{}", tree);
-/// # }
-/// ```
 pub fn generate_tree(
     path: &Path,
     prefix: &str,

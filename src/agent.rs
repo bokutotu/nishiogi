@@ -27,7 +27,7 @@ use std::{
 
 use crate::{
     github_copilot_client::{CopilotClient, CopilotError, Message},
-    show_file::{self, read_file_content, FileReadError},
+    show_file::{read_file_content, FileReadError},
     tree::generate_tree,
 };
 
@@ -169,7 +169,6 @@ impl Agent {
     ///
     /// Returns `AgentError::CopilotError` if the Copilot client fails to initialize
     pub async fn new() -> Result<Self, AgentError> {
-        // Initialize with default editor version
         let client = CopilotClient::from_env_with_models("1.0.0".to_string())
             .await
             .map_err(AgentError::CopilotError)?;
@@ -344,19 +343,18 @@ impl Agent {
             let cmd_result = if command.starts_with("tree ") {
                 let path = command.strip_prefix("tree ").unwrap_or(".");
                 let path = Path::new(path);
-                
+
                 // Check if path exists
                 if !path.exists() {
                     return Err(AgentError::PathNotFound(path.to_path_buf()));
                 }
-                
+
                 // Directly call the generate_tree function from tree module
                 generate_tree(path, "", None, None)
-                
             } else if command.starts_with("show_file ") {
                 let path = command.strip_prefix("show_file ").unwrap_or("");
                 let path = Path::new(path);
-                
+
                 // Directly call the read_file_content function from show_file module
                 match read_file_content(path) {
                     Ok(content) => content,

@@ -1,7 +1,8 @@
-use clap::{Parser, Subcommand};
-use nishiogi::agent::Agent;
 use std::process;
-use tokio;
+
+use clap::{Parser, Subcommand};
+
+use nishiogi::agent::Agent;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -26,25 +27,27 @@ async fn main() {
 
     match &cli.command {
         Commands::Ask { question } => {
-            println!("Processing question: {}", question);
-            
+            println!("Processing question: {question}");
+
             // Initialize the agent
             let mut agent = match Agent::new().await {
                 Ok(agent) => agent,
                 Err(err) => {
-                    eprintln!("Failed to initialize agent: {}", err);
+                    eprintln!("Failed to initialize agent: {err}");
                     process::exit(1);
                 }
             };
-            
+
             // Process the question
             match agent.process_query(question).await {
                 Ok(answer) => {
-                    println!("\n=== Answer ===\n");
-                    println!("{}", answer);
+                    println!();
+                    println!("=== Answer ===");
+                    println!();
+                    println!("{answer}");
                 }
                 Err(err) => {
-                    eprintln!("Error processing query: {}", err);
+                    eprintln!("Error processing query: {err}");
                     process::exit(1);
                 }
             }

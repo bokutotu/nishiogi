@@ -308,6 +308,7 @@ impl CopilotClient {
     /// # Errors
     ///
     /// Returns a `CopilotError` if the HTTP request fails or the response cannot be parsed.
+    #[allow(dead_code)]
     pub async fn get_agents(&self) -> Result<Vec<Agent>, CopilotError> {
         let url = "https://api.githubcopilot.com/agents";
         let headers = self.get_headers().await?;
@@ -408,6 +409,7 @@ impl CopilotClient {
     /// # Errors
     ///
     /// Returns a `CopilotError` if the HTTP request fails or the response cannot be parsed.
+    #[allow(dead_code)]
     pub async fn get_embeddings(
         &self,
         inputs: Vec<String>,
